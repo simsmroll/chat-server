@@ -10,6 +10,13 @@ function broadcast(obj) {
   });
 }
 
+function sendTo(filter, obj) {
+  const s = JSON.stringify(obj);
+  wss.clients.forEach((c) => {
+    if (c.readyState === 1 && filter(c)) c.send(s);
+  });
+}
+
 wss.on("connection", (ws) => {
   ws.send(JSON.stringify({ type: "history", items: history }));
 
@@ -31,6 +38,14 @@ wss.on("connection", (ws) => {
       history.push(m);
       if (history.length > 50) history.shift();
       broadcast(m);
+    } else if (d.type === "invite" && ws.user) {
+      ws.room = ws.user;
+      sendTo((c) => c !== ws, { type: "invite", from: ws.user });
+    } else if (d.type === "join_draw" && ws.user) {
+      ws.room = String(d.room).slice(0, 20);
+      sendTo((c) => c !== ws && c.room === ws.room, { type: "peer_joined", user: ws.user });
+    } else if ((d.type === "stroke" || d.type === "clear") && ws.room) {
+      sendTo((c) => c !== ws && c.room === ws.room, { ...d, user: ws.user });
     }
   });
 
