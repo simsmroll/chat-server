@@ -4,6 +4,10 @@ const fs = require("fs");
 const wss = new WebSocketServer({ port: process.env.PORT || 9080 });
 const history = [];
 
+// ---------- المدير (الباسورد من Suga: ADMIN_KEY) ----------
+let adminFails = 0;
+let adminLockUntil = 0;
+
 // ---------- تيليجرام (ما يشتغل إلا مع TG_TOKEN) ----------
 const TOKEN = process.env.TG_TOKEN;
 const SHOW_TEXT = true; // false = يوصل "رسالة جديدة من فلان" بدون النص
@@ -120,13 +124,18 @@ wss.on("connection", (ws) => {
       broadcast(m);
       notifyOffline(ws.user, text);
     } else if (d.type === "admin") {
-      if ((ws.fails || 0) >= 5) return;
+      const fail = () => ws.send(JSON.stringify({ type: "admin_fail" }));
+      if (Date.now() < adminLockUntil) return fail();
       const ok = process.env.ADMIN_KEY && d.key === process.env.ADMIN_KEY;
       if (!ok) {
-        ws.fails = (ws.fails || 0) + 1;
-        ws.send(JSON.stringify({ type: "admin_fail" }));
-        return;
+        adminFails++;
+        if (adminFails >= 10) {
+          adminLockUntil = Date.now() + 10 * 60 * 1000;
+          adminFails = 0;
+        }
+        return fail();
       }
+      adminFails = 0;
       if (d.cmd === "auth") {
         ws.send(JSON.stringify({ type: "admin_ok" }));
       } else if (d.cmd === "delete_chat") {
@@ -144,6 +153,12 @@ wss.on("connection", (ws) => {
         left: !!d.left,
         walking: !!d.walking,
         look: d.look || {},
+      });
+    } else if (d.type === "sticker" && ws.user) {
+      sendTo((c) => c !== ws && c.user, {
+        type: "sticker",
+        user: ws.user,
+        id: Number(d.id) || 0,
       });
     } else if (d.type === "invite" && ws.user) {
       ws.room = ws.user;
