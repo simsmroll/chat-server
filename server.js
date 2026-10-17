@@ -101,6 +101,21 @@ function sendTo(filter, obj) {
   });
 }
 
+// ---------- قائمة المتصلين ----------
+function playerList(exclude) {
+  const list = [];
+  wss.clients.forEach((c) => {
+    if (c.readyState === 1 && c.user && c !== exclude) {
+      list.push({ user: c.user, look: c.look || {}, scores: c.scores || {} });
+    }
+  });
+  return list;
+}
+
+function broadcastPlayers(exclude) {
+  broadcast({ type: "players", list: playerList(exclude) });
+}
+
 wss.on("connection", (ws) => {
   ws.send(JSON.stringify({ type: "history", items: history }));
 
@@ -115,6 +130,7 @@ wss.on("connection", (ws) => {
     if (d.type === "join") {
       ws.user = String(d.user).slice(0, 20);
       broadcast({ type: "system", text: ws.user + " دخل" });
+      broadcastPlayers();
     } else if (d.type === "msg" && ws.user) {
       const text = String(d.text).slice(0, 500);
       if (!text.trim()) return;
@@ -123,6 +139,18 @@ wss.on("connection", (ws) => {
       if (history.length > 50) history.shift();
       broadcast(m);
       notifyOffline(ws.user, text);
+    } else if (d.type === "profile" && ws.user) {
+      const L = d.look || {};
+      const S = d.scores || {};
+      ws.look = {};
+      for (const k of ["hair", "top", "skirt", "dress"]) {
+        ws.look[k] = Number.isInteger(L[k]) ? L[k] : -1;
+      }
+      ws.scores = {
+        catch: Math.max(0, Number(S["catch"]) || 0),
+        match: Math.max(0, Number(S["match"]) || 0),
+      };
+      broadcastPlayers();
     } else if (d.type === "admin") {
       const fail = () => ws.send(JSON.stringify({ type: "admin_fail" }));
       if (Date.now() < adminLockUntil) return fail();
@@ -175,6 +203,7 @@ wss.on("connection", (ws) => {
     if (ws.user) {
       broadcast({ type: "system", text: ws.user + " خرج" });
       broadcast({ type: "leave", user: ws.user });
+      broadcastPlayers(ws);
     }
   });
 });
